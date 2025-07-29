@@ -1,218 +1,555 @@
-import { useEffect, useState } from "react";
 import {
   Box,
-  Heading,
-  Text,
-  VStack,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
   Button,
+  Divider,
+  Flex,
+  Heading,
+  Input,
+  Radio,
+  RadioGroup,
+  Table,
+  Tbody,
+  Td,
+  Text,
+  Th,
+  Thead,
+  Tr,
+  VStack,
   useToast,
-  Select,
 } from "@chakra-ui/react";
-import Navbar2 from "../components/Navbar2";
+import { useEffect, useState } from "react";
 import api from "../services/api";
+import Navbar2 from "../components/Navbar2";
 
 type Product = {
   id: number;
   productName: string;
   price: number;
+  stockQuantity: number;
+  category: string;
+  expiryDate: string;
+  imageUrl: string;
 };
 
 type CartItem = {
   productId: number;
-  productName: string;
+  name: string;
   price: number;
+  quantity: number;
 };
 
-function ManagerDashboard() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState("cash");
+type CartResponse = {
+  id: number;
+  items: CartItem[];
+  total: number;
+};
+
+export default function ManagerDashboard() {
   const toast = useToast();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [cart, setCart] = useState<CartResponse | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState("mpesa");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [quantityInputs, setQuantityInputs] = useState<{
+    [key: number]: number;
+  }>({});
+  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const response = await api.get("/product/getAll", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setProducts(response.data);
-      } catch (err) {
-        toast({
-          title: "Error",
-          description: "Failed to fetch products",
-          status: "error",
-          duration: 3000,
-        });
+  // Fetch products
+  const fetchProducts = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
       }
-    };
-
-    fetchProducts();
-  }, []);
-
-  const addToCart = (product: Product) => {
-    setCart((prev) => [
-      ...prev,
-      {
-        productId: product.id,
-        productName: product.productName,
-        price: product.price,
-      },
-    ]);
-    toast({
-      title: "Added to Cart",
-      description: `${product.productName} added successfully.`,
-      status: "success",
-      duration: 2000,
-    });
+      const response = await api.get("/product/getAll", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setProducts(response.data);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to fetch products",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const checkout = async () => {
-    if (cart.length === 0) {
+  // Create new cart
+  const createNewCart = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      const response = await api.post(
+        "/api/carts/add",
+        { items: [] },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setCart(response.data);
       toast({
-        title: "Cart is empty",
-        status: "warning",
-        duration: 2000,
+        title: "Success",
+        description: "New cart created",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create cart",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch cart by ID
+  const fetchCart = async (cartId: number) => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      const response = await api.get(`/api/carts/${cartId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setCart(response.data);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to fetch cart",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add to cart
+  const addToCart = async (productId: number) => {
+    if (!cart) {
+      toast({
+        title: "Error",
+        description: "Please create a cart first",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
       });
       return;
     }
-
-    try {
-      const token = localStorage.getItem("token");
-
-      await api.post(
-        "/api/carts/checkout",
-        {
-          items: cart.map((item) => ({
-            productId: item.productId,
-            quantity: 1, // default quantity
-          })),
-          paymentMethod,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-
+    const quantity = quantityInputs[productId] || 1;
+    const product = products.find((p) => p.id === productId);
+    if (product && quantity > product.stockQuantity) {
       toast({
-        title: "Checkout Successful",
-        status: "success",
-        duration: 3000,
-      });
-      setCart([]);
-    } catch (err) {
-      toast({
-        title: "Checkout Failed",
-        description: "Something went wrong",
+        title: "Error",
+        description: `Only ${product.stockQuantity} ${product.productName}(s) in stock`,
         status: "error",
         duration: 3000,
+        isClosable: true,
       });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      await api.post(
+        `/api/carts/add?cartId=${cart.id}`,
+        { items: [{ productId, quantity }] },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      await fetchCart(cart.id);
+      toast({
+        title: "Success",
+        description: "Item added to cart",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add to cart",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  // Update quantity
+  const updateQuantity = async (productId: number, quantity: number) => {
+    if (!cart) return;
+    const product = products.find((p) => p.id === productId);
+    if (product && quantity > product.stockQuantity) {
+      toast({
+        title: "Error",
+        description: `Only ${product.stockQuantity} ${product.productName}(s) in stock`,
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      await api.put(
+        `/api/carts/${cart.id}/items/${productId}/quantity`,
+        { quantity },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      await fetchCart(cart.id);
+      toast({
+        title: "Success",
+        description: "Quantity updated",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update quantity",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Remove from cart
+  const removeFromCart = async (productId: number) => {
+    if (!cart) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      await api.delete(`/api/carts/${cart.id}/items/${productId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      await fetchCart(cart.id);
+      toast({
+        title: "Success",
+        description: "Item removed from cart",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to remove item",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Clear cart
+  const clearCart = async () => {
+    if (!cart) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      await api.delete(`/api/carts/${cart.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setCart(null);
+      toast({
+        title: "Success",
+        description: "Cart cleared",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to clear cart",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle checkout
+  const handleCheckout = async () => {
+    if (!cart || cart.items.length === 0) {
+      toast({
+        title: "Error",
+        description: "Cart is empty",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    if (paymentMethod === "mpesa" && !phoneNumber) {
+      toast({
+        title: "Error",
+        description: "Please enter a phone number for M-Pesa",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      await api.post(
+        `/api/carts/${cart.id}/checkout`,
+        { paymentMethod, phoneNumber },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast({
+        title: "Success",
+        description: `Payment initiated via ${paymentMethod}${
+          phoneNumber ? ` to ${phoneNumber}` : ""
+        }.`,
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+      await clearCart();
+      setPhoneNumber("");
+      await fetchProducts(); // Refresh product stock quantities
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Checkout failed",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
   return (
     <Box minH="100vh" bg="gray.50">
       <Navbar2 />
-
-      <VStack spacing={4} p={8} align="center">
-        <Heading size="lg" color="black">
-          Manager Dashboard
-        </Heading>
-        <Text fontSize="md" color="gray.600">
-          View products, add to cart, and checkout using M-Pesa or Cash.
-        </Text>
-      </VStack>
-
-      <Box maxW="6xl" mx="auto" bg="white" p={6} borderRadius="md" shadow="md">
-        <Heading size="md" mb={4}>
-          Available Products
-        </Heading>
-        <Table variant="simple">
-          <Thead bg="gray.100">
-            <Tr>
-              <Th>ID</Th>
-              <Th>Name</Th>
-              <Th>Price</Th>
-              <Th>Action</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {products.map((product) => (
-              <Tr key={product.id}>
-                <Td>{product.id}</Td>
-                <Td>{product.productName}</Td>
-                <Td>${product.price.toFixed(2)}</Td>
-                <Td>
-                  <Button colorScheme="blue" onClick={() => addToCart(product)}>
+      <Flex p={6} gap={10} justify="center" align="start" wrap="wrap">
+        {/* Left: Products */}
+        <Box
+          flex="1"
+          minW="300px"
+          maxW="500px"
+          bg="white"
+          p={5}
+          borderRadius="md"
+          boxShadow="sm"
+        >
+          <Flex justify="space-between" align="center" mb={4}>
+            <Heading size="md">Products</Heading>
+            <Button
+              colorScheme="teal"
+              onClick={createNewCart}
+              isLoading={isLoading}
+            >
+              Create New Cart
+            </Button>
+          </Flex>
+          {isLoading ? (
+            <Text>Loading products...</Text>
+          ) : products.length === 0 ? (
+            <Text>No products available.</Text>
+          ) : (
+            products.map((product) => (
+              <Flex
+                key={product.id}
+                justify="space-between"
+                mb={3}
+                align="center"
+              >
+                <Box>
+                  <Text fontWeight="bold">{product.productName}</Text>
+                  <Text color="gray.600">${product.price.toFixed(2)}</Text>
+                  <Text color="gray.500">Stock: {product.stockQuantity}</Text>
+                </Box>
+                <Flex gap={2}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={product.stockQuantity}
+                    width="60px"
+                    value={quantityInputs[product.id] || 1}
+                    onChange={(e) =>
+                      setQuantityInputs({
+                        ...quantityInputs,
+                        [product.id]: parseInt(e.target.value) || 1,
+                      })
+                    }
+                  />
+                  <Button
+                    colorScheme="blue"
+                    onClick={() => addToCart(product.id)}
+                    isDisabled={
+                      !cart || isLoading || product.stockQuantity === 0
+                    }
+                  >
                     Add to Cart
                   </Button>
-                </Td>
-              </Tr>
-            ))}
-          </Tbody>
-        </Table>
-      </Box>
-
-      <Box
-        maxW="4xl"
-        mx="auto"
-        mt={8}
-        bg="white"
-        p={6}
-        borderRadius="md"
-        shadow="md"
-      >
-        <Heading size="sm" mb={4}>
-          Cart Summary
-        </Heading>
-        {cart.length === 0 ? (
-          <Text color="gray.500">No items in cart.</Text>
-        ) : (
-          <Table size="sm" variant="simple">
-            <Thead>
-              <Tr>
-                <Th>Name</Th>
-                <Th>Price</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {cart.map((item, index) => (
-                <Tr key={index}>
-                  <Td>{item.productName}</Td>
-                  <Td>${item.price.toFixed(2)}</Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        )}
-
-        <Box mt={4}>
-          <Select
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-          >
-            <option value="cash">Cash</option>
-            <option value="mpesa">M-Pesa</option>
-          </Select>
-
-          <Button
-            mt={4}
-            colorScheme="green"
-            onClick={checkout}
-            isDisabled={cart.length === 0}
-          >
-            Checkout
-          </Button>
+                </Flex>
+              </Flex>
+            ))
+          )}
         </Box>
-      </Box>
+
+        {/* Right: Cart */}
+        <Box
+          flex="1"
+          minW="300px"
+          maxW="500px"
+          bg="white"
+          p={5}
+          borderRadius="md"
+          boxShadow="sm"
+        >
+          <Heading size="md" mb={4}>
+            Cart {cart ? `(ID: ${cart.id})` : ""}
+          </Heading>
+          {isLoading ? (
+            <Text>Loading cart...</Text>
+          ) : cart && cart.items.length > 0 ? (
+            <>
+              <Table size="sm" variant="simple" mb={3}>
+                <Thead>
+                  <Tr>
+                    <Th>Product</Th>
+                    <Th isNumeric>Qty</Th>
+                    <Th isNumeric>Price</Th>
+                    <Th>Action</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {cart.items.map((item) => (
+                    <Tr key={item.productId}>
+                      <Td>{item.name}</Td>
+                      <Td isNumeric>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={
+                            products.find((p) => p.id === item.productId)
+                              ?.stockQuantity || 1
+                          }
+                          width="60px"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            updateQuantity(
+                              item.productId,
+                              parseInt(e.target.value) || 1,
+                            )
+                          }
+                          isDisabled={isLoading}
+                        />
+                      </Td>
+                      <Td isNumeric>${item.price.toFixed(2)}</Td>
+                      <Td>
+                        <Button
+                          size="sm"
+                          colorScheme="red"
+                          onClick={() => removeFromCart(item.productId)}
+                          isDisabled={isLoading}
+                        >
+                          Remove
+                        </Button>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+
+              <Divider my={2} />
+
+              <Text fontWeight="bold" mb={2}>
+                Total: ${cart.total.toFixed(2)}
+              </Text>
+
+              <RadioGroup
+                onChange={setPaymentMethod}
+                value={paymentMethod}
+                mb={2}
+              >
+                <VStack align="start">
+                  <Radio value="mpesa">M-Pesa</Radio>
+                  <Radio value="cash">Cash</Radio>
+                </VStack>
+              </RadioGroup>
+
+              {paymentMethod === "mpesa" && (
+                <Input
+                  placeholder="Customer Phone Number"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  mb={2}
+                />
+              )}
+
+              <Flex mt={4} gap={2}>
+                <Button
+                  colorScheme="green"
+                  onClick={handleCheckout}
+                  isLoading={isLoading}
+                >
+                  Initiate Payment
+                </Button>
+                <Button onClick={clearCart} isDisabled={isLoading}>
+                  Clear Cart
+                </Button>
+              </Flex>
+            </>
+          ) : (
+            <Text color="gray.500">
+              Cart is empty. Create a new cart to start.
+            </Text>
+          )}
+        </Box>
+      </Flex>
     </Box>
   );
 }
-
-export default ManagerDashboard;
