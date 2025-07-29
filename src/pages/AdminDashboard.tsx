@@ -25,7 +25,7 @@ const AdminDashboard = () => {
 
   const cards: DashboardCard[] = [
     { title: "Managers", path: "/admin/managers", icon: UserCog },
-    { title: "Library", path: "/admin/products", icon: BookOpen },
+    { title: "Products", path: "/admin/products", icon: BookOpen },
     { title: "Staff", path: "/admin/staff", icon: Users },
   ];
 

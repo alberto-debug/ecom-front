@@ -31,7 +31,7 @@ import api from "../services/api";
 
 type Product = {
   id: number;
-  name: string;
+  productName: string;
   price: number;
 };
 
@@ -161,7 +161,7 @@ const ProductsCards = () => {
         </ModalContent>
       </Modal>
 
-      {/* Products Table Below */}
+      {/* Products Table */}
       <Box
         mt={6}
         p={6}
@@ -181,7 +181,7 @@ const ProductsCards = () => {
             <Thead bg="gray.50">
               <Tr>
                 <Th>ID</Th>
-                <Th>Name</Th>
+                <Th>Product Name</Th>
                 <Th>Price</Th>
               </Tr>
             </Thead>
@@ -189,7 +189,7 @@ const ProductsCards = () => {
               {products.map((product, index) => (
                 <Tr key={product.id} bg={index % 2 === 0 ? "white" : "gray.50"}>
                   <Td>{product.id}</Td>
-                  <Td>{product.name}</Td>
+                  <Td>{product.productName}</Td>
                   <Td>${product.price.toFixed(2)}</Td>
                 </Tr>
               ))}
