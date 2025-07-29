@@ -50,9 +50,9 @@ export default function ManagerDashboard() {
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("mpesa");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [quantityInputs, setQuantityInputs] = useState<{
-    [key: number]: number;
-  }>({});
+  const [quantityInputs, setQuantityInputs] = useState<{ [key: number]: string }>(
+    {}
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch products
@@ -91,7 +91,7 @@ export default function ManagerDashboard() {
       const response = await api.post(
         "/api/carts/add",
         { items: [] },
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       setCart(response.data);
       toast({
@@ -151,8 +151,8 @@ export default function ManagerDashboard() {
       });
       return;
     }
-    const quantity = quantityInputs[productId] || 1;
-    const product = products.find((p) => p.id === productId);
+    const quantity = parseInt(quantityInputs[productId]) || 1;
+    const product = products.find(p => p.id === productId);
     if (product && quantity > product.stockQuantity) {
       toast({
         title: "Error",
@@ -172,7 +172,7 @@ export default function ManagerDashboard() {
       await api.post(
         `/api/carts/add?cartId=${cart.id}`,
         { items: [{ productId, quantity }] },
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       await fetchCart(cart.id);
       toast({
@@ -198,7 +198,7 @@ export default function ManagerDashboard() {
   // Update quantity
   const updateQuantity = async (productId: number, quantity: number) => {
     if (!cart) return;
-    const product = products.find((p) => p.id === productId);
+    const product = products.find(p => p.id === productId);
     if (product && quantity > product.stockQuantity) {
       toast({
         title: "Error",
@@ -218,7 +218,7 @@ export default function ManagerDashboard() {
       await api.put(
         `/api/carts/${cart.id}/items/${productId}/quantity`,
         { quantity },
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       await fetchCart(cart.id);
       toast({
@@ -338,7 +338,7 @@ export default function ManagerDashboard() {
       await api.post(
         `/api/carts/${cart.id}/checkout`,
         { paymentMethod, phoneNumber },
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       toast({
         title: "Success",
@@ -362,6 +362,39 @@ export default function ManagerDashboard() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle quantity input change
+  const handleQuantityChange = (productId: number, value: string) => {
+    setQuantityInputs({
+      ...quantityInputs,
+      [productId]: value,
+    });
+  };
+
+  // Handle quantity input blur
+  const handleQuantityBlur = (productId: number) => {
+    const value = quantityInputs[productId];
+    const parsedValue = parseInt(value);
+    const product = products.find(p => p.id === productId);
+    if (!value || isNaN(parsedValue) || parsedValue < 1) {
+      setQuantityInputs({
+        ...quantityInputs,
+        [productId]: "1",
+      });
+    } else if (product && parsedValue > product.stockQuantity) {
+      setQuantityInputs({
+        ...quantityInputs,
+        [productId]: product.stockQuantity.toString(),
+      });
+      toast({
+        title: "Error",
+        description: `Only ${product.stockQuantity} ${product.productName}(s) in stock`,
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
     }
   };
 
@@ -416,20 +449,15 @@ export default function ManagerDashboard() {
                     min={1}
                     max={product.stockQuantity}
                     width="60px"
-                    value={quantityInputs[product.id] || 1}
-                    onChange={(e) =>
-                      setQuantityInputs({
-                        ...quantityInputs,
-                        [product.id]: parseInt(e.target.value) || 1,
-                      })
-                    }
+                    value={quantityInputs[product.id] ?? ""}
+                    onChange={(e) => handleQuantityChange(product.id, e.target.value)}
+                    onBlur={() => handleQuantityBlur(product.id)}
+                    placeholder="1"
                   />
                   <Button
                     colorScheme="blue"
                     onClick={() => addToCart(product.id)}
-                    isDisabled={
-                      !cart || isLoading || product.stockQuantity === 0
-                    }
+                    isDisabled={!cart || isLoading || product.stockQuantity === 0}
                   >
                     Add to Cart
                   </Button>
@@ -473,18 +501,15 @@ export default function ManagerDashboard() {
                         <Input
                           type="number"
                           min={1}
-                          max={
-                            products.find((p) => p.id === item.productId)
-                              ?.stockQuantity || 1
-                          }
+                          max={products.find(p => p.id === item.productId)?.stockQuantity || 1}
                           width="60px"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateQuantity(
-                              item.productId,
-                              parseInt(e.target.value) || 1,
-                            )
-                          }
+                          value={quantityInputs[item.productId] ?? item.quantity}
+                          onChange={(e) => handleQuantityChange(item.productId, e.target.value)}
+                          onBlur={() => {
+                            const value = parseInt(quantityInputs[item.productId]) || item.quantity;
+                            updateQuantity(item.productId, value);
+                            handleQuantityBlur(item.productId);
+                          }}
                           isDisabled={isLoading}
                         />
                       </Td>
@@ -538,7 +563,10 @@ export default function ManagerDashboard() {
                 >
                   Initiate Payment
                 </Button>
-                <Button onClick={clearCart} isDisabled={isLoading}>
+                <Button
+                  onClick={clearCart}
+                  isDisabled={isLoading}
+                >
                   Clear Cart
                 </Button>
               </Flex>

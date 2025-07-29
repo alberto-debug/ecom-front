@@ -19,6 +19,19 @@ interface ResponseDTO {
   data?: string | null;
 }
 
+interface CartItemDTO {
+  productId: number;
+  quantity: number;
+}
+
+interface CartResponseDTO {
+  cartId: number;
+  items: { productId: number; name: string; price: number; quantity: number }[];
+  total: number;
+  status: string;
+  createdAt: string;
+}
+
 type ApiErrorResponse = ResponseDTO | { message?: string } | null | undefined;
 
 // ================== Axios Instance ==================
@@ -187,47 +200,214 @@ export const searchManager = async (
   }
 };
 
-// Create Product
+// ================== Product Management ==================
+
+// Create Product → POST /product/create
 export const createProduct = async (
   dto: ProductRequestDTO,
   token: string,
 ): Promise<ProductResponseDTO> => {
-  const response = await api.post("/product/create", dto, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
+  try {
+    const response = await api.post("/product/create", dto, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to create product",
+    );
+  }
 };
 
-// List Products
+// List Products → GET /product/getAll
 export const listProducts = async (
   token: string,
 ): Promise<ProductResponseDTO[]> => {
-  const response = await api.get("/product/getAll", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
+  try {
+    const response = await api.get("/product/getAll", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to fetch products",
+    );
+  }
 };
 
-// Update Product
+// Update Product → PUT /product/:id
 export const updateProduct = async (
   id: number,
   dto: ProductRequestDTO,
   token: string,
 ): Promise<ProductResponseDTO> => {
-  const response = await api.put(`/product/${id}`, dto, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
+  try {
+    const response = await api.put(`/product/${id}`, dto, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to update product",
+    );
+  }
 };
 
-// Delete Product
+// Delete Product → DELETE /product/:id
 export const deleteProduct = async (
   id: number,
   token: string,
 ): Promise<void> => {
-  await api.delete(`/product/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  try {
+    await api.delete(`/product/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to delete product",
+    );
+  }
+};
+
+// ================== Cart Management ==================
+
+// Get Products → GET /api/products
+export const getProducts = async (
+  token: string,
+): Promise<ProductResponseDTO[]> => {
+  try {
+    const response = await api.get("/api/products", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to fetch products",
+    );
+  }
+};
+
+// Add to Cart → POST /api/carts/add
+export const addToCart = async (
+  data: { items: CartItemDTO[]; cartId?: number },
+  token: string,
+): Promise<CartResponseDTO> => {
+  try {
+    const response = await api.post("/api/carts/add", data.items, {
+      params: { cartId: data.cartId },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to add to cart",
+    );
+  }
+};
+
+// Get Cart → GET /api/carts/:cartId
+export const getCart = async (
+  cartId: number,
+  token: string,
+): Promise<CartResponseDTO> => {
+  try {
+    const response = await api.get(`/api/carts/${cartId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to fetch cart",
+    );
+  }
+};
+
+// Update Cart Item Quantity → PUT /api/carts/:cartId/items/:productId/quantity
+export const updateQuantity = async (
+  cartId: number,
+  productId: number,
+  quantity: number,
+  token: string,
+): Promise<CartResponseDTO> => {
+  try {
+    const response = await api.put(
+      `/api/carts/${cartId}/items/${productId}/quantity`,
+      { quantity },
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to update quantity",
+    );
+  }
+};
+
+// Remove from Cart → DELETE /api/carts/:cartId/items/:productId
+export const removeFromCart = async (
+  cartId: number,
+  productId: number,
+  token: string,
+): Promise<CartResponseDTO> => {
+  try {
+    const response = await api.delete(
+      `/api/carts/${cartId}/items/${productId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to remove item",
+    );
+  }
+};
+
+// Clear Cart → DELETE /api/carts/:cartId
+export const clearCart = async (
+  cartId: number,
+  token: string,
+): Promise<CartResponseDTO> => {
+  try {
+    const response = await api.delete(`/api/carts/${cartId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to clear cart",
+    );
+  }
+};
+
+// Checkout → POST /api/carts/:cartId/checkout
+export const checkout = async (
+  cartId: number,
+  phoneNumber: string,
+  paymentMethod: string,
+  token: string,
+): Promise<void> => {
+  try {
+    await api.post(
+      `/api/carts/${cartId}/checkout`,
+      { phoneNumber, paymentMethod },
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(axiosError.response?.data?.message || "Checkout failed");
+  }
 };
 
 export default api;
