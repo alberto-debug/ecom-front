@@ -352,19 +352,37 @@ export default function ManagerDashboard() {
     }
   };
 
-  // Poll order status
-  const pollOrderStatus = async (orderId: number, token: string) => {
-    try {
-      console.log(`Polling order ${orderId}...`);
-      const response = await api.get(`/api/orders/${orderId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      console.log("Poll response:", response.data);
-      return response.data as OrderResponse;
-    } catch (error: any) {
-      console.error("Error polling order status:", error);
-      throw new Error(error.message || "Failed to fetch order status");
+  // Poll order status with retry logic
+  const pollOrderStatus = async (
+    orderId: number,
+    token: string,
+    retries: number = 3,
+  ): Promise<OrderResponse> => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(
+          `Polling order ${orderId} (Attempt ${attempt}/${retries})...`,
+        );
+        const response = await api.get(`/api/orders/${orderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        console.log("Poll response:", response.data);
+        return response.data as OrderResponse;
+      } catch (error: any) {
+        console.error(
+          `Error polling order status (Attempt ${attempt}/${retries}):`,
+          error,
+        );
+        if (attempt === retries) {
+          throw new Error(
+            error.message || "Failed to fetch order status after retries",
+          );
+        }
+        // Wait before retrying
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
     }
+    throw new Error("Failed to fetch order status after retries");
   };
 
   // Handle payment cancellation
@@ -375,7 +393,7 @@ export default function ManagerDashboard() {
     }
 
     setPaymentStatus("failed");
-    setPaymentMessage("Payment cancelled by user");
+    setPaymentMessage(`a= Payment cancelled by user`);
 
     // Auto-close modal after 2 seconds
     setTimeout(() => {
@@ -385,14 +403,18 @@ export default function ManagerDashboard() {
   };
 
   // Handle successful payment completion
-  const handlePaymentSuccess = async () => {
+  const handlePaymentSuccess = async (paymentMethod: string) => {
     if (pollInterval) {
       clearInterval(pollInterval);
       setPollInterval(null);
     }
 
     setPaymentStatus("success");
-    setPaymentMessage("Payment completed successfully!");
+    setPaymentMessage(
+      paymentMethod === "mpesa"
+        ? `a= Payment completed successfully!`
+        : "Payment completed successfully!",
+    );
 
     // Refresh products to show updated stock
     await fetchProducts();
@@ -415,7 +437,7 @@ export default function ManagerDashboard() {
     }
 
     setPaymentStatus("failed");
-    setPaymentMessage(message);
+    setPaymentMessage(`a= ${message}`);
 
     // Auto-close modal after 5 seconds
     setTimeout(() => {
@@ -474,15 +496,26 @@ export default function ManagerDashboard() {
 
       const order = response.data as OrderResponse;
       setCurrentOrder(order);
+      console.log("Checkout response:", order);
+
+      // Open modal for all payment methods
+      onOpen();
 
       if (paymentMethod === "cash") {
-        handlePaymentSuccess();
+        // Cash payments are completed immediately
+        setPaymentStatus("success");
+        setPaymentMessage("Payment completed successfully!");
+        // Auto-close modal after 3 seconds
+        setTimeout(() => {
+          onClose();
+          resetPaymentModal();
+          fetchProducts(); // Refresh products to update stock
+        }, 3000);
       } else if (paymentMethod === "mpesa") {
         setPaymentStatus("processing");
         setPaymentMessage(
-          `Please complete the payment on your phone (${phoneNumber}). Transaction ID: ${order.checkoutRequestId}`,
+          `a= Please complete the payment on your phone (${phoneNumber}).\nTransaction ID: ${order.checkoutRequestId || "Not provided"}`,
         );
-        onOpen();
 
         const interval = setInterval(async () => {
           try {
@@ -493,7 +526,7 @@ export default function ManagerDashboard() {
             if (status.paymentStatus === "COMPLETED") {
               clearInterval(interval);
               setPollInterval(null);
-              handlePaymentSuccess();
+              handlePaymentSuccess("mpesa");
             } else if (status.paymentStatus === "FAILED") {
               clearInterval(interval);
               setPollInterval(null);
@@ -506,7 +539,7 @@ export default function ManagerDashboard() {
             clearInterval(interval);
             setPollInterval(null);
             handlePaymentFailure(
-              "Unable to verify payment status. Please contact support if payment was deducted.",
+              "Unable to verify payment status. Please check your M-Pesa messages and contact support if payment was deducted.",
             );
           }
         }, 10000); // Poll every 10 seconds
@@ -527,6 +560,18 @@ export default function ManagerDashboard() {
     } catch (error: any) {
       const errorMessage =
         error.response?.data?.error || error.message || "Checkout failed";
+
+      setPaymentStatus("failed");
+      setPaymentMessage(
+        paymentMethod === "mpesa" ? `a= ${errorMessage}` : errorMessage,
+      );
+      onOpen();
+
+      // Auto-close modal after 5 seconds
+      setTimeout(() => {
+        onClose();
+        resetPaymentModal();
+      }, 5000);
 
       toast({
         title: "Error",
@@ -605,12 +650,16 @@ export default function ManagerDashboard() {
                   <AlertIcon />
                   <Box>
                     <AlertTitle>Payment in Progress</AlertTitle>
-                    <AlertDescription>{paymentMessage}</AlertDescription>
+                    <AlertDescription whiteSpace="pre-wrap">
+                      {paymentMessage}
+                    </AlertDescription>
                   </Box>
                 </Alert>
                 <Text fontSize="sm" color="gray.600" textAlign="center">
                   Please complete the payment on your phone. This may take up to
                   5 minutes.
+                  <br />
+                  Verify the Transaction ID above matches the one on your phone.
                 </Text>
                 <Button
                   colorScheme="red"

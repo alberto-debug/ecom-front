@@ -5,7 +5,7 @@ function Navbar() {
     <Box bg="black" p={4} color="white">
       <Flex justify="space-between" align="center">
         <Heading size="lg" color="white">
-          School System
+          Ecom System
         </Heading>
       </Flex>
     </Box>

@@ -87,7 +87,7 @@ const Navbar2 = () => {
                 bgClip="text"
                 letterSpacing="tight"
               >
-                School Management System
+                Ecom Managment System
               </Text>
               <Text fontSize="xs" color="gray.300" fontWeight="medium">
                 Administrative Portal
