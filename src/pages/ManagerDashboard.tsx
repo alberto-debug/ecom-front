@@ -16,6 +16,18 @@ import {
   Tr,
   VStack,
   useToast,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalCloseButton,
+  Spinner,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
+  useDisclosure,
 } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
 import api from "../services/api";
@@ -47,17 +59,31 @@ type CartResponse = {
 type OrderResponse = {
   orderId: number;
   cartId: number;
-  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
+  paymentStatus: "PENDING" | "COMPLETED" | "FAILED";
+  checkoutRequestId?: string;
+  total: number;
+  paymentMethod: string;
 };
 
 export default function ManagerDashboard() {
   const toast = useToast();
+  const { isOpen, onOpen, onClose } = useDisclosure();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("mpesa");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [quantityInputs, setQuantityInputs] = useState<{ [key: number]: string }>({});
+  const [quantityInputs, setQuantityInputs] = useState<{
+    [key: number]: string;
+  }>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  // Payment modal states
+  const [paymentStatus, setPaymentStatus] = useState<
+    "processing" | "success" | "failed" | null
+  >(null);
+  const [currentOrder, setCurrentOrder] = useState<OrderResponse | null>(null);
+  const [paymentMessage, setPaymentMessage] = useState("");
+  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
 
   // Fetch products
   const fetchProducts = async () => {
@@ -95,7 +121,7 @@ export default function ManagerDashboard() {
       const response = await api.post(
         "/api/carts/add",
         { items: [] },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       setCart(response.data);
       toast({
@@ -131,13 +157,28 @@ export default function ManagerDashboard() {
       });
       setCart(response.data);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to fetch cart",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
+      // If cart not found, it might have been completed
+      if (
+        error.response?.status === 404 ||
+        error.message.includes("not found")
+      ) {
+        setCart(null);
+        toast({
+          title: "Cart Completed",
+          description: "Cart has been completed successfully",
+          status: "info",
+          duration: 3000,
+          isClosable: true,
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to fetch cart",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -156,7 +197,7 @@ export default function ManagerDashboard() {
       return;
     }
     const quantity = parseInt(quantityInputs[productId]) || 1;
-    const product = products.find(p => p.id === productId);
+    const product = products.find((p) => p.id === productId);
     if (product && quantity > product.stockQuantity) {
       toast({
         title: "Error",
@@ -176,7 +217,7 @@ export default function ManagerDashboard() {
       await api.post(
         `/api/carts/add?cartId=${cart.id}`,
         { items: [{ productId, quantity }] },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       await fetchCart(cart.id);
       toast({
@@ -202,7 +243,7 @@ export default function ManagerDashboard() {
   // Update quantity
   const updateQuantity = async (productId: number, quantity: number) => {
     if (!cart) return;
-    const product = products.find(p => p.id === productId);
+    const product = products.find((p) => p.id === productId);
     if (product && quantity > product.stockQuantity) {
       toast({
         title: "Error",
@@ -222,7 +263,7 @@ export default function ManagerDashboard() {
       await api.put(
         `/api/carts/${cart.id}/items/${productId}/quantity`,
         { quantity },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       await fetchCart(cart.id);
       toast({
@@ -246,7 +287,7 @@ export default function ManagerDashboard() {
   };
 
   // Remove from cart
-  const removeFromCart = async (productId: numbeCartItemr) => {
+  const removeFromCart = async (productId: number) => {
     if (!cart) return;
     setIsLoading(true);
     try {
@@ -314,13 +355,84 @@ export default function ManagerDashboard() {
   // Poll order status
   const pollOrderStatus = async (orderId: number, token: string) => {
     try {
+      console.log(`Polling order ${orderId}...`);
       const response = await api.get(`/api/orders/${orderId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      console.log("Poll response:", response.data);
       return response.data as OrderResponse;
     } catch (error: any) {
+      console.error("Error polling order status:", error);
       throw new Error(error.message || "Failed to fetch order status");
     }
+  };
+
+  // Handle payment cancellation
+  const handlePaymentCancel = async () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
+    }
+
+    setPaymentStatus("failed");
+    setPaymentMessage("Payment cancelled by user");
+
+    // Auto-close modal after 2 seconds
+    setTimeout(() => {
+      onClose();
+      resetPaymentModal();
+    }, 2000);
+  };
+
+  // Handle successful payment completion
+  const handlePaymentSuccess = async () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
+    }
+
+    setPaymentStatus("success");
+    setPaymentMessage("Payment completed successfully!");
+
+    // Refresh products to show updated stock
+    await fetchProducts();
+
+    // Reset form
+    setPhoneNumber("");
+
+    // Auto-close modal after 3 seconds
+    setTimeout(() => {
+      onClose();
+      resetPaymentModal();
+    }, 3000);
+  };
+
+  // Handle payment failure
+  const handlePaymentFailure = (message: string) => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
+    }
+
+    setPaymentStatus("failed");
+    setPaymentMessage(message);
+
+    // Auto-close modal after 5 seconds
+    setTimeout(() => {
+      onClose();
+      resetPaymentModal();
+    }, 5000);
+  };
+
+  // Reset payment modal state
+  const resetPaymentModal = () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
+    }
+    setPaymentStatus(null);
+    setCurrentOrder(null);
+    setPaymentMessage("");
   };
 
   // Handle checkout
@@ -345,67 +457,80 @@ export default function ManagerDashboard() {
       });
       return;
     }
+
     setIsLoading(true);
+
     try {
       const token = localStorage.getItem("token");
       if (!token) {
         throw new Error("No authentication token found");
       }
+
       const response = await api.post(
         `/api/carts/${cart.id}/checkout`,
         { phoneNumber, paymentMethod, amount: cart.total },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
-      const order = response.data as OrderResponse;
-      toast({
-        title: "Success",
-        description: `Payment initiated via ${paymentMethod} to ${phoneNumber}. Please complete on your phone.`,
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
 
-      // Poll for payment status
-      const interval = setInterval(async () => {
-        try {
-          const status = await pollOrderStatus(order.orderId, token);
-          if (status.paymentStatus === "SUCCESS") {
-            toast({
-              title: "Success",
-              description: "Payment completed successfully",
-              status: "success",
-              duration: 5000,
-              isClosable: true,
-            });
+      const order = response.data as OrderResponse;
+      setCurrentOrder(order);
+
+      if (paymentMethod === "cash") {
+        handlePaymentSuccess();
+      } else if (paymentMethod === "mpesa") {
+        setPaymentStatus("processing");
+        setPaymentMessage(
+          `Please complete the payment on your phone (${phoneNumber}). Transaction ID: ${order.checkoutRequestId}`,
+        );
+        onOpen();
+
+        const interval = setInterval(async () => {
+          try {
+            console.log("Polling payment status for order:", order.orderId);
+            const status = await pollOrderStatus(order.orderId, token);
+            console.log("Payment status response:", status);
+
+            if (status.paymentStatus === "COMPLETED") {
+              clearInterval(interval);
+              setPollInterval(null);
+              handlePaymentSuccess();
+            } else if (status.paymentStatus === "FAILED") {
+              clearInterval(interval);
+              setPollInterval(null);
+              handlePaymentFailure(
+                "Payment was cancelled or failed. Please try again.",
+              );
+            }
+          } catch (error: any) {
+            console.error("Error polling payment status:", error);
             clearInterval(interval);
-            await clearCart();
-            setPhoneNumber("");
-            await fetchProducts();
-          } else if (status.paymentStatus === "FAILED") {
-            toast({
-              title: "Error",
-              description: "Payment failed",
-              status: "error",
-              duration: 5000,
-              isClosable: true,
-            });
-            clearInterval(interval);
+            setPollInterval(null);
+            handlePaymentFailure(
+              "Unable to verify payment status. Please contact support if payment was deducted.",
+            );
           }
-        } catch (error: any) {
-          toast({
-            title: "Error",
-            description: error.message || "Failed to check payment status",
-            status: "error",
-            duration: 5000,
-            isClosable: true,
-          });
-          clearInterval(interval);
-        }
-      }, 5000);
+        }, 10000); // Poll every 10 seconds
+
+        setPollInterval(interval);
+
+        // Set timeout for payment (5 minutes)
+        setTimeout(() => {
+          if (paymentStatus === "processing") {
+            clearInterval(interval);
+            setPollInterval(null);
+            handlePaymentFailure(
+              "Payment timeout. Please check your M-Pesa messages and contact support if payment was deducted.",
+            );
+          }
+        }, 300000); // 5 minutes timeout
+      }
     } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Checkout failed";
+
       toast({
         title: "Error",
-        description: error.message || "Checkout failed",
+        description: errorMessage,
         status: "error",
         duration: 5000,
         isClosable: true,
@@ -427,7 +552,7 @@ export default function ManagerDashboard() {
   const handleQuantityBlur = (productId: number) => {
     const value = quantityInputs[productId];
     const parsedValue = parseInt(value);
-    const product = products.find(p => p.id === productId);
+    const product = products.find((p) => p.id === productId);
     if (!value || isNaN(parsedValue) || parsedValue < 1) {
       setQuantityInputs({
         ...quantityInputs,
@@ -455,6 +580,72 @@ export default function ManagerDashboard() {
   return (
     <Box minH="100vh" bg="gray.50">
       <Navbar2 />
+
+      {/* Payment Processing Modal */}
+      <Modal
+        isOpen={isOpen}
+        onClose={paymentStatus === "processing" ? () => {} : onClose}
+        closeOnOverlayClick={paymentStatus !== "processing"}
+        size="md"
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>
+            {paymentStatus === "processing" && "Processing Payment"}
+            {paymentStatus === "success" && "Payment Successful"}
+            {paymentStatus === "failed" && "Payment Failed"}
+          </ModalHeader>
+          {paymentStatus !== "processing" && <ModalCloseButton />}
+
+          <ModalBody pb={6}>
+            {paymentStatus === "processing" && (
+              <VStack spacing={4}>
+                <Spinner size="xl" color="blue.500" />
+                <Alert status="info">
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>Payment in Progress</AlertTitle>
+                    <AlertDescription>{paymentMessage}</AlertDescription>
+                  </Box>
+                </Alert>
+                <Text fontSize="sm" color="gray.600" textAlign="center">
+                  Please complete the payment on your phone. This may take up to
+                  5 minutes.
+                </Text>
+                <Button
+                  colorScheme="red"
+                  variant="outline"
+                  onClick={handlePaymentCancel}
+                  size="sm"
+                >
+                  Cancel Payment
+                </Button>
+              </VStack>
+            )}
+
+            {paymentStatus === "success" && (
+              <Alert status="success">
+                <AlertIcon />
+                <Box>
+                  <AlertTitle>Success!</AlertTitle>
+                  <AlertDescription>{paymentMessage}</AlertDescription>
+                </Box>
+              </Alert>
+            )}
+
+            {paymentStatus === "failed" && (
+              <Alert status="error">
+                <AlertIcon />
+                <Box>
+                  <AlertTitle>Payment Failed</AlertTitle>
+                  <AlertDescription>{paymentMessage}</AlertDescription>
+                </Box>
+              </Alert>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
       <Flex p={6} gap={10} justify="center" align="start" wrap="wrap">
         {/* Left: Products */}
         <Box
@@ -500,14 +691,18 @@ export default function ManagerDashboard() {
                     max={product.stockQuantity}
                     width="60px"
                     value={quantityInputs[product.id] ?? ""}
-                    onChange={(e) => handleQuantityChange(product.id, e.target.value)}
+                    onChange={(e) =>
+                      handleQuantityChange(product.id, e.target.value)
+                    }
                     onBlur={() => handleQuantityBlur(product.id)}
                     placeholder="1"
                   />
                   <Button
                     colorScheme="blue"
                     onClick={() => addToCart(product.id)}
-                    isDisabled={!cart || isLoading || product.stockQuantity === 0}
+                    isDisabled={
+                      !cart || isLoading || product.stockQuantity === 0
+                    }
                   >
                     Add to Cart
                   </Button>
@@ -551,12 +746,21 @@ export default function ManagerDashboard() {
                         <Input
                           type="number"
                           min={1}
-                          max={products.find(p => p.id === item.productId)?.stockQuantity || 1}
+                          max={
+                            products.find((p) => p.id === item.productId)
+                              ?.stockQuantity || 1
+                          }
                           width="60px"
-                          value={quantityInputs[item.productId] ?? item.quantity}
-                          onChange={(e) => handleQuantityChange(item.productId, e.target.value)}
+                          value={
+                            quantityInputs[item.productId] ?? item.quantity
+                          }
+                          onChange={(e) =>
+                            handleQuantityChange(item.productId, e.target.value)
+                          }
                           onBlur={() => {
-                            const value = parseInt(quantityInputs[item.productId]) || item.quantity;
+                            const value =
+                              parseInt(quantityInputs[item.productId]) ||
+                              item.quantity;
                             updateQuantity(item.productId, value);
                             handleQuantityBlur(item.productId);
                           }}
@@ -610,12 +814,16 @@ export default function ManagerDashboard() {
                   colorScheme="green"
                   onClick={handleCheckout}
                   isLoading={isLoading}
+                  loadingText="Processing..."
                 >
-                  Initiate Payment
+                  {paymentMethod === "mpesa"
+                    ? "Pay with M-Pesa"
+                    : "Complete Cash Sale"}
                 </Button>
                 <Button
                   onClick={clearCart}
                   isDisabled={isLoading}
+                  variant="outline"
                 >
                   Clear Cart
                 </Button>
