@@ -1,7 +1,6 @@
 import axios, { AxiosError } from "axios";
 import type { ProductRequestDTO, ProductResponseDTO } from "../types";
 
-// ================== Types ==================
 interface LoginResponse {
   token: string;
   message?: string;
@@ -32,9 +31,14 @@ interface CartResponseDTO {
   createdAt: string;
 }
 
+interface OrderResponseDTO {
+  orderId: number;
+  cartId: number;
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
+}
+
 type ApiErrorResponse = ResponseDTO | { message?: string } | null | undefined;
 
-// ================== Axios Instance ==================
 const api = axios.create({
   baseURL: "http://localhost:8080",
   headers: {
@@ -42,9 +46,6 @@ const api = axios.create({
   },
 });
 
-// ================== Auth ==================
-
-// Admin login → POST /admin/login
 export const adminLogin = async (
   email: string,
   password: string,
@@ -61,7 +62,6 @@ export const adminLogin = async (
   }
 };
 
-// Manager login → POST /login/login
 export const managerLogin = async (
   email: string,
   password: string,
@@ -80,14 +80,11 @@ export const managerLogin = async (
   }
 };
 
-// ================== Token Decoding ==================
 export const getUserFromToken = (token: string): User => {
   try {
     if (!token) throw new Error("No token provided");
-
     const base64Payload = token.split(".")[1];
     if (!base64Payload) throw new Error("Invalid token format");
-
     const jsonPayload = atob(base64Payload);
     const payload = JSON.parse(jsonPayload) as {
       sub?: string;
@@ -99,10 +96,8 @@ export const getUserFromToken = (token: string): User => {
       name?: string;
       [key: string]: any;
     };
-
     const email: string = payload.sub || payload.email || "";
     if (!email) throw new Error("Email not found in token");
-
     const roles: string[] = Array.isArray(payload.roles)
       ? payload.roles
       : Array.isArray(payload.authorities)
@@ -112,7 +107,6 @@ export const getUserFromToken = (token: string): User => {
           : payload.role
             ? [payload.role]
             : [];
-
     return {
       email,
       roles,
@@ -123,9 +117,6 @@ export const getUserFromToken = (token: string): User => {
   }
 };
 
-// ================== Manager Management ==================
-
-// Create manager → POST /admin/managers/create
 export const createManager = async (
   name: string,
   email: string,
@@ -147,7 +138,6 @@ export const createManager = async (
   }
 };
 
-// List managers → GET /admin/managers/list
 export const listManagers = async (
   token: string,
 ): Promise<{ message: string; data: string }> => {
@@ -164,7 +154,6 @@ export const listManagers = async (
   }
 };
 
-// Delete manager → DELETE /admin/managers/delete/:id
 export const deleteManager = async (
   id: string,
   token: string,
@@ -182,7 +171,6 @@ export const deleteManager = async (
   }
 };
 
-// Search manager → GET /admin/managers/search?email=...
 export const searchManager = async (
   email: string,
   token: string,
@@ -200,9 +188,6 @@ export const searchManager = async (
   }
 };
 
-// ================== Product Management ==================
-
-// Create Product → POST /product/create
 export const createProduct = async (
   dto: ProductRequestDTO,
   token: string,
@@ -220,7 +205,6 @@ export const createProduct = async (
   }
 };
 
-// List Products → GET /product/getAll
 export const listProducts = async (
   token: string,
 ): Promise<ProductResponseDTO[]> => {
@@ -237,7 +221,6 @@ export const listProducts = async (
   }
 };
 
-// Update Product → PUT /product/:id
 export const updateProduct = async (
   id: number,
   dto: ProductRequestDTO,
@@ -256,7 +239,6 @@ export const updateProduct = async (
   }
 };
 
-// Delete Product → DELETE /product/:id
 export const deleteProduct = async (
   id: number,
   token: string,
@@ -273,9 +255,6 @@ export const deleteProduct = async (
   }
 };
 
-// ================== Cart Management ==================
-
-// Get Products → GET /api/products
 export const getProducts = async (
   token: string,
 ): Promise<ProductResponseDTO[]> => {
@@ -292,7 +271,6 @@ export const getProducts = async (
   }
 };
 
-// Add to Cart → POST /api/carts/add
 export const addToCart = async (
   data: { items: CartItemDTO[]; cartId?: number },
   token: string,
@@ -311,7 +289,6 @@ export const addToCart = async (
   }
 };
 
-// Get Cart → GET /api/carts/:cartId
 export const getCart = async (
   cartId: number,
   token: string,
@@ -329,7 +306,6 @@ export const getCart = async (
   }
 };
 
-// Update Cart Item Quantity → PUT /api/carts/:cartId/items/:productId/quantity
 export const updateQuantity = async (
   cartId: number,
   productId: number,
@@ -351,7 +327,6 @@ export const updateQuantity = async (
   }
 };
 
-// Remove from Cart → DELETE /api/carts/:cartId/items/:productId
 export const removeFromCart = async (
   cartId: number,
   productId: number,
@@ -373,7 +348,6 @@ export const removeFromCart = async (
   }
 };
 
-// Clear Cart → DELETE /api/carts/:cartId
 export const clearCart = async (
   cartId: number,
   token: string,
@@ -391,22 +365,40 @@ export const clearCart = async (
   }
 };
 
-// Checkout → POST /api/carts/:cartId/checkout
 export const checkout = async (
   cartId: number,
   phoneNumber: string,
   paymentMethod: string,
+  amount: number,
   token: string,
-): Promise<void> => {
+): Promise<OrderResponseDTO> => {
   try {
-    await api.post(
+    const response = await api.post(
       `/api/carts/${cartId}/checkout`,
-      { phoneNumber, paymentMethod },
+      { phoneNumber, paymentMethod, amount },
       { headers: { Authorization: `Bearer ${token}` } },
     );
+    return response.data;
   } catch (error) {
     const axiosError = error as AxiosError<ApiErrorResponse>;
     throw new Error(axiosError.response?.data?.message || "Checkout failed");
+  }
+};
+
+export const pollOrderStatus = async (
+  orderId: number,
+  token: string,
+): Promise<OrderResponseDTO> => {
+  try {
+    const response = await api.get(`/api/orders/${orderId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<ApiErrorResponse>;
+    throw new Error(
+      axiosError.response?.data?.message || "Failed to fetch order status",
+    );
   }
 };
 

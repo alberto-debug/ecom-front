@@ -44,15 +44,19 @@ type CartResponse = {
   total: number;
 };
 
+type OrderResponse = {
+  orderId: number;
+  cartId: number;
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
+};
+
 export default function ManagerDashboard() {
   const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("mpesa");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [quantityInputs, setQuantityInputs] = useState<{ [key: number]: string }>(
-    {}
-  );
+  const [quantityInputs, setQuantityInputs] = useState<{ [key: number]: string }>({});
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch products
@@ -242,7 +246,7 @@ export default function ManagerDashboard() {
   };
 
   // Remove from cart
-  const removeFromCart = async (productId: number) => {
+  const removeFromCart = async (productId: numbeCartItemr) => {
     if (!cart) return;
     setIsLoading(true);
     try {
@@ -307,6 +311,18 @@ export default function ManagerDashboard() {
     }
   };
 
+  // Poll order status
+  const pollOrderStatus = async (orderId: number, token: string) => {
+    try {
+      const response = await api.get(`/api/orders/${orderId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data as OrderResponse;
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to fetch order status");
+    }
+  };
+
   // Handle checkout
   const handleCheckout = async () => {
     if (!cart || cart.items.length === 0) {
@@ -319,10 +335,10 @@ export default function ManagerDashboard() {
       });
       return;
     }
-    if (paymentMethod === "mpesa" && !phoneNumber) {
+    if (paymentMethod === "mpesa" && !phoneNumber.match(/^258\d{9}$/)) {
       toast({
         title: "Error",
-        description: "Please enter a phone number for M-Pesa",
+        description: "Invalid phone number. Use format 258xxxxxxxxx",
         status: "error",
         duration: 3000,
         isClosable: true,
@@ -335,23 +351,57 @@ export default function ManagerDashboard() {
       if (!token) {
         throw new Error("No authentication token found");
       }
-      await api.post(
+      const response = await api.post(
         `/api/carts/${cart.id}/checkout`,
-        { paymentMethod, phoneNumber },
+        { phoneNumber, paymentMethod, amount: cart.total },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      const order = response.data as OrderResponse;
       toast({
         title: "Success",
-        description: `Payment initiated via ${paymentMethod}${
-          phoneNumber ? ` to ${phoneNumber}` : ""
-        }.`,
+        description: `Payment initiated via ${paymentMethod} to ${phoneNumber}. Please complete on your phone.`,
         status: "success",
         duration: 3000,
         isClosable: true,
       });
-      await clearCart();
-      setPhoneNumber("");
-      await fetchProducts(); // Refresh product stock quantities
+
+      // Poll for payment status
+      const interval = setInterval(async () => {
+        try {
+          const status = await pollOrderStatus(order.orderId, token);
+          if (status.paymentStatus === "SUCCESS") {
+            toast({
+              title: "Success",
+              description: "Payment completed successfully",
+              status: "success",
+              duration: 5000,
+              isClosable: true,
+            });
+            clearInterval(interval);
+            await clearCart();
+            setPhoneNumber("");
+            await fetchProducts();
+          } else if (status.paymentStatus === "FAILED") {
+            toast({
+              title: "Error",
+              description: "Payment failed",
+              status: "error",
+              duration: 5000,
+              isClosable: true,
+            });
+            clearInterval(interval);
+          }
+        } catch (error: any) {
+          toast({
+            title: "Error",
+            description: error.message || "Failed to check payment status",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+          });
+          clearInterval(interval);
+        }
+      }, 5000);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -440,7 +490,7 @@ export default function ManagerDashboard() {
               >
                 <Box>
                   <Text fontWeight="bold">{product.productName}</Text>
-                  <Text color="gray.600">${product.price.toFixed(2)}</Text>
+                  <Text color="gray.600">MZN {product.price.toFixed(2)}</Text>
                   <Text color="gray.500">Stock: {product.stockQuantity}</Text>
                 </Box>
                 <Flex gap={2}>
@@ -513,7 +563,7 @@ export default function ManagerDashboard() {
                           isDisabled={isLoading}
                         />
                       </Td>
-                      <Td isNumeric>${item.price.toFixed(2)}</Td>
+                      <Td isNumeric>MZN {item.price.toFixed(2)}</Td>
                       <Td>
                         <Button
                           size="sm"
@@ -532,7 +582,7 @@ export default function ManagerDashboard() {
               <Divider my={2} />
 
               <Text fontWeight="bold" mb={2}>
-                Total: ${cart.total.toFixed(2)}
+                Total: MZN {cart.total.toFixed(2)}
               </Text>
 
               <RadioGroup
@@ -548,7 +598,7 @@ export default function ManagerDashboard() {
 
               {paymentMethod === "mpesa" && (
                 <Input
-                  placeholder="Customer Phone Number"
+                  placeholder="Phone Number (258xxxxxxxxx)"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   mb={2}
